@@ -1,60 +1,14 @@
 use rusqlite::{Connection, Result, named_params};
 
-// SELECT *
-// FROM ngram_word nw
-// JOIN word w ON w.word_id = nw.word_id
-// WHERE ngram_id = 1
-// ORDER BY seq;
-
 //https://stackoverflow.com/questions/10963316/correct-way-to-store-uni-bi-trigrams-ngrams-in-rdbms
 //Requires constraint: ngram_word.seq >0 AND ngram_word.seq <= (select ngram.n FROM ngram ng WHERE ng.ngram_id = ngram_word.ngram_id)
 
+mod db;
 
 fn main() -> Result<()> {
     let conn = Connection::open("ngram.db")?;
 
-// CREATE TABLE "document" (
-// 	"document_id"	INTEGER NOT NULL UNIQUE,
-// 	PRIMARY KEY("document_id" AUTOINCREMENT)
-// )
-
-// CREATE TABLE "document_ngram" (
-// 	"document_id"	INTEGER NOT NULL UNIQUE,
-// 	"ngram_id"	INTEGER NOT NULL UNIQUE,
-// 	FOREIGN KEY("document_id") REFERENCES "document"("document_id"),
-// 	FOREIGN KEY("ngram_id") REFERENCES "ngram"("ngram_id")
-// )
-
-
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS ngram (
-	        ngram_id INTEGER NOT NULL UNIQUE,
-	        n INTEGER NOT NULL,
-	        PRIMARY KEY(ngram_id AUTOINCREMENT)
-        )",
-        (),
-    )?;
-
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS word (
-            word_id	INTEGER NOT NULL UNIQUE,
-            the_word TEXT NOT NULL,
-            PRIMARY KEY(word_id AUTOINCREMENT)
-        )",
-        (),
-    )?;
-
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS ngram_word (
-            ngram_id INTEGER NOT NULL,
-            seq	INTEGER NOT NULL,
-            word_id	INTEGER,
-            PRIMARY KEY(ngram_id,seq),
-            FOREIGN KEY(ngram_id) REFERENCES ngram(ngram_id),
-            FOREIGN KEY(word_id) REFERENCES word(word_id)
-        )",
-        (),
-    )?;
+    db::init_db(&conn);
 
     conn.execute(
         "INSERT INTO word(the_word) VALUES ('the'),('man'),('who'),('sold'),('the'),('world');",
