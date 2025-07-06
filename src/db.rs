@@ -1,6 +1,10 @@
 use rusqlite::Connection;
 //use std::fs;
 
+
+// Enable foreign key constraints
+// conn.execute("PRAGMA foreign_keys = ON;", [])?;
+
 pub fn init_db(conn: &Connection) {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS ngram (

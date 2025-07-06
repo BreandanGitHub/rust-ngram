@@ -1,0 +1,81 @@
+-- Table: document
+CREATE TABLE document (
+    document_id INTEGER PRIMARY KEY
+);
+
+-- Table: term
+CREATE TABLE term (
+    term_id INTEGER PRIMARY KEY,
+    term TEXT NOT NULL UNIQUE
+);
+
+-- Index to speed up lookups by term
+CREATE INDEX idx_term_term ON term(term);
+
+-- Table: ngram
+CREATE TABLE ngram (
+    ngram_id INTEGER PRIMARY KEY,
+    n INTEGER NOT NULL CHECK (n > 0),
+    hash TEXT NOT NULL UNIQUE
+);
+
+-- Optional: index on n size for analytics
+CREATE INDEX idx_ngram_n ON ngram(n);
+
+-- Table: ngram_term (maps terms into ordered ngrams)
+CREATE TABLE ngram_term (
+    ngram_id INTEGER NOT NULL,
+    sequence INTEGER NOT NULL,
+    term_id INTEGER NOT NULL,
+    PRIMARY KEY (ngram_id, sequence),
+    FOREIGN KEY (ngram_id) REFERENCES ngram(ngram_id) ON DELETE CASCADE,
+    FOREIGN KEY (term_id) REFERENCES term(term_id) ON DELETE CASCADE
+);
+
+-- Index to help fetch all term_ids in a term position
+CREATE INDEX idx_ngramterm_term ON ngram_term(term_id);
+
+-- Table: document_ngram (ngram occurrences per document)
+CREATE TABLE document_ngram (
+    document_id INTEGER NOT NULL,
+    ngram_id INTEGER NOT NULL,
+    count INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (document_id, ngram_id),
+    FOREIGN KEY (document_id) REFERENCES document(document_id) ON DELETE CASCADE,
+    FOREIGN KEY (ngram_id) REFERENCES ngram(ngram_id) ON DELETE CASCADE
+);
+
+-- Indexes for lookup direction
+CREATE INDEX idx_docngram_doc ON document_ngram(document_id);
+CREATE INDEX idx_docngram_ngram ON document_ngram(ngram_id);
+
+
+
+
+
+
+
+// Start a transaction
+    let tx = conn.transaction()?;
+
+    // Insert a new author
+    tx.execute("INSERT INTO authors (name) VALUES (?1)", params!["Octavia Butler"])?;
+
+    // Get the last inserted row ID (author ID)
+    let author_id = tx.last_insert_rowid();
+
+    // Insert a book for that author
+    tx.execute(
+        "INSERT INTO books (title, author_id) VALUES (?1, ?2)",
+        params!["Kindred", author_id],
+    )?;
+
+    // Commit the transaction
+    tx.commit()?;
+
+    println!("Successfully inserted author and book.");
+    Ok(())
+
+
+
+    INSERT OR IGNORE INTO table_name (column1, column2, ...)

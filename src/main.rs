@@ -8,6 +8,8 @@ mod db;
 fn main() -> Result<()> {
     let conn = Connection::open("ngram.db")?;
 
+    // Args - spider or headless browser 
+
     db::init_db(&conn);
 
     conn.execute(
