@@ -1,0 +1,158 @@
+-- Table: document
+CREATE TABLE document (
+    document_id INTEGER PRIMARY KEY
+);
+
+-- Table: term
+CREATE TABLE term (
+    term_id INTEGER PRIMARY KEY,
+    term TEXT NOT NULL UNIQUE
+);
+
+-- Index to speed up lookups by term
+CREATE INDEX idx_term_term ON term(term);
+
+-- Table: ngram
+CREATE TABLE ngram (
+    ngram_id INTEGER PRIMARY KEY,
+    n INTEGER NOT NULL CHECK (n > 0),
+    hash TEXT NOT NULL UNIQUE
+);
+
+-- Optional: index on n size for analytics
+CREATE INDEX idx_ngram_n ON ngram(n);
+
+-- Table: ngram_term (maps terms into ordered ngrams)
+CREATE TABLE ngram_term (
+    ngram_id INTEGER NOT NULL,
+    sequence INTEGER NOT NULL,
+    term_id INTEGER NOT NULL,
+    PRIMARY KEY (ngram_id, sequence),
+    FOREIGN KEY (ngram_id) REFERENCES ngram(ngram_id) ON DELETE CASCADE,
+    FOREIGN KEY (term_id) REFERENCES term(term_id) ON DELETE CASCADE
+);
+
+-- Index to help fetch all term_ids in a term position
+CREATE INDEX idx_ngramterm_term ON ngram_term(term_id);
+
+-- Table: document_ngram (ngram occurrences per document)
+CREATE TABLE document_ngram (
+    document_id INTEGER NOT NULL,
+    ngram_id INTEGER NOT NULL,
+    count INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (document_id, ngram_id),
+    FOREIGN KEY (document_id) REFERENCES document(document_id) ON DELETE CASCADE,
+    FOREIGN KEY (ngram_id) REFERENCES ngram(ngram_id) ON DELETE CASCADE
+);
+
+-- Indexes for lookup direction
+CREATE INDEX idx_docngram_doc ON document_ngram(document_id);
+CREATE INDEX idx_docngram_ngram ON document_ngram(ngram_id);
+
+
+
+
+
+[dependencies]
+rusqlite = { version = "0.30", features = ["bundled"] }
+sha2 = "0.10"  # For hashing ngrams
+
+
+use rusqlite::{params, Connection, OptionalExtension};
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+
+// Tokenize input text into lowercase terms
+fn tokenize(text: &str) -> Vec<String> {
+    text.split_whitespace().map(|t| t.to_lowercase()).collect()
+}
+
+// Generate sliding n-grams from token list
+fn generate_ngrams(terms: &[String], n: usize) -> Vec<Vec<String>> {
+    terms.windows(n).map(|w| w.to_vec()).collect()
+}
+
+// Hash function to identify unique n-grams by term_id list
+fn sha_hash_ngram(term_ids: &[i64]) -> String {
+    let mut hasher = Sha256::new();
+    for id in term_ids {
+        hasher.update(id.to_le_bytes());
+    }
+    format!("{:x}", hasher.finalize())
+}
+
+// Insert a term if it doesn't exist, then return its ID
+fn insert_or_get_term_id(conn: &Connection, term: &str) -> rusqlite::Result<i64> {
+    conn.execute("INSERT OR IGNORE INTO term (term) VALUES (?)", params![term])?;
+    conn.query_row("SELECT term_id FROM term WHERE term = ?", params![term], |row| row.get(0))
+}
+
+// Insert an n-gram or get its ID if already present
+fn insert_or_get_ngram_id(conn: &Connection, term_ids: &[i64], n: usize) -> rusqlite::Result<i64> {
+    let hash = sha_hash_ngram(term_ids);
+    conn.execute(
+        "INSERT OR IGNORE INTO ngram (n, hash) VALUES (?, ?)",
+        params![n as i64, hash],
+    )?;
+
+    let ngram_id: i64 = conn.query_row(
+        "SELECT ngram_id FROM ngram WHERE hash = ?",
+        params![hash],
+        |row| row.get(0),
+    )?;
+
+    // Insert each term in the sequence
+    for (i, term_id) in term_ids.iter().enumerate() {
+        conn.execute(
+            "INSERT OR IGNORE INTO ngram_term (ngram_id, sequence, term_id) VALUES (?, ?, ?)",
+            params![ngram_id, i as i64, term_id],
+        )?;
+    }
+
+    Ok(ngram_id)
+}
+
+// Insert document and all its ngrams
+fn add_document(conn: &Connection, doc_id: i64, text: &str, n: usize) -> rusqlite::Result<()> {
+    conn.execute("INSERT INTO document (document_id) VALUES (?)", params![doc_id])?;
+
+    let terms = tokenize(text);
+    let mut term_ids = Vec::new();
+
+    for term in &terms {
+        term_ids.push(insert_or_get_term_id(conn, term)?);
+    }
+
+    let ngram_windows = term_ids.windows(n);
+    let mut doc_ngram_counts: HashMap<i64, i64> = HashMap::new();
+
+    for window in ngram_windows {
+        let ngram_id = insert_or_get_ngram_id(conn, window, n)?;
+        *doc_ngram_counts.entry(ngram_id).or_insert(0) += 1;
+    }
+
+    for (ngram_id, count) in doc_ngram_counts {
+        conn.execute(
+            "INSERT INTO document_ngram (document_id, ngram_id, count)
+             VALUES (?, ?, ?)
+             ON CONFLICT(document_id, ngram_id) DO UPDATE SET count = count + ?",
+            params![doc_id, ngram_id, count, count],
+        )?;
+    }
+
+    Ok(())
+}
+
+
+
+fn main() -> rusqlite::Result<()> {
+    let conn = Connection::open("ngrams.db")?;
+
+    // Optional: run schema creation here (only once)
+    // conn.execute_batch(include_str!("schema.sql"))?;
+
+    let text = "Natural language processing with rust is quite fun and educational";
+    add_document(&conn, 1, text, 2)?;  // 2 = bigrams
+
+    Ok(())
+}
